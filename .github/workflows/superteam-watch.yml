@@ -1,0 +1,80 @@
+name: superteam watch
+
+on:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Poll the agent and public listing endpoints
+        env:
+          SUPERTEAM_AGENT_KEY: ${{ secrets.SUPERTEAM_AGENT_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # Agent eligible listings (needs the agent key).
+          if [ -n "${SUPERTEAM_AGENT_KEY}" ]; then
+            curl -sS -H "Authorization: Bearer ${SUPERTEAM_AGENT_KEY}" \
+              "https://superteam.fun/api/agents/listings/live?take=50" -o out/agent-listings.json || true
+          else
+            echo '[]' > out/agent-listings.json
+          fi
+          # Every public listing with its reward and region.
+          curl -sS "https://superteam.fun/api/listings?take=100" -o out/all-listings.json || true
+          node -e '
+            const fs = require("fs");
+            const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return []; } };
+            const agent = read("out/agent-listings.json");
+            const all = read("out/all-listings.json");
+            const rows = Array.isArray(all) ? all : (all.listings || all.data || []);
+            const money = rows.filter((l) => /USDC|USDG|USD/i.test(String(l.token || "")));
+            const out = {
+              agentEligible: (Array.isArray(agent) ? agent : agent.listings || []).map((l) => ({
+                title: l.title, access: l.agentAccess, reward: `${l.rewardAmount} ${l.token || ""}`, due: l.deadline, slug: l.slug,
+              })),
+              cashListings: money.map((l) => ({ title: l.title, reward: `${l.rewardAmount} ${l.token}`, due: l.deadline, slug: l.slug, access: l.agentAccess })),
+              count: rows.length,
+            };
+            fs.writeFileSync("out/summary.json", JSON.stringify(out, null, 2));
+            console.log(JSON.stringify(out, null, 2));
+          '
+
+      - name: Publish the digest
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const summary = JSON.parse(fs.readFileSync("out/summary.json", "utf8"));
+            const lines = [];
+            lines.push("Automated Superteam Earn digest " + new Date().toISOString());
+            lines.push("");
+            lines.push(`## agent eligible listings (${summary.agentEligible.length})`);
+            if (summary.agentEligible.length === 0) {
+              lines.push("- none right now. The agent feed only shows listings marked AGENT_ALLOWED or AGENT_ONLY.");
+            }
+            for (const l of summary.agentEligible) {
+              lines.push(`- [${l.access}] ${l.title} | ${l.reward} | due ${String(l.due).slice(0, 10)} | ${l.slug}`);
+            }
+            lines.push("");
+            lines.push(`## cash listings (${summary.cashListings.length} of ${summary.count})`);
+            for (const l of summary.cashListings) {
+              lines.push(`- ${l.reward} | due ${String(l.due).slice(0, 10)} | ${l.access} | ${l.title} | ${l.slug}`);
+            }
+            const body = lines.join("\n") + "\n";
+            const title = `superteam digest ${new Date().toISOString().slice(0, 10)}`;
+            const { data: existing } = await github.rest.issues.listForRepo({ owner: "airdropia", repo: "earn-ops", state: "open", per_page: 50 });
+            const same = existing.find((i) => i.title === title);
+            if (same) {
+              await github.rest.issues.update({ owner: "airdropia", repo: "earn-ops", issue_number: same.number, body });
+            } else {
+              await github.rest.issues.create({ owner: "airdropia", repo: "earn-ops", title, body });
+            }
+            console.log(body);
