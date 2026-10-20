@@ -17,30 +17,54 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const repos = [
-              { owner: "elizaOS", repo: "eliza", name: "eliza" },
-              { owner: "SlopDotCash", repo: "slopdotcash", name: "slopdotcash" },
-            ];
             const lines = [];
+
+            // 1. The payment state of the funded projects. The reward stays
+            //    "disabled" until the pool starts moving, so this is the
+            //    signal that the money is live.
+            try {
+              const res = await fetch("https://slop.cash/api/v1/projects");
+              const data = await res.json();
+              lines.push("## pool payment state");
+              for (const p of data.projects || []) {
+                const r = p.reward || {};
+                lines.push(
+                  `- ${p.id}: paymentMode=${r.paymentMode} committed=${r.committedMinor} cap=${r.monthlyCapDisplay} chain=${r.chain} status=${p.status}`
+                );
+              }
+              lines.push("");
+            } catch (e) {
+              lines.push(`## pool payment state\n- unavailable: ${e.message}\n`);
+            }
+
+            // 2. Open issues in the funded repositories.
+            const repos = [
+              { owner: "elizaOS", repo: "eliza" },
+              { owner: "SlopDotCash", repo: "slopdotcash" },
+            ];
             for (const r of repos) {
               const { data: issues } = await github.rest.issues.listForRepo({
                 owner: r.owner, repo: r.repo, state: "open", per_page: 60,
               });
               const candidates = issues.filter((i) => !i.pull_request && i.title.length > 12);
               lines.push(`## ${r.owner}/${r.repo} - ${candidates.length} open issues`);
-              for (const i of candidates.slice(0, 25)) {
-                lines.push(`- #${i.number} ${i.title}`);
-              }
+              for (const i of candidates.slice(0, 25)) lines.push(`- #${i.number} ${i.title}`);
               lines.push("");
             }
+
+            // 3. Our pull requests and whether they merged.
             const { data: prs } = await github.rest.pulls.list({
-              owner: "elizaOS", repo: "eliza", state: "open",
+              owner: "elizaOS", repo: "eliza", state: "all", per_page: 50,
               head: "airdropia:fix/openai-rate-limit-trajectory-record",
             });
             lines.push("## our pull requests");
-            for (const p of prs) {
-              lines.push(`- #${p.number} ${p.title} (${p.html_url}) draft=${p.draft}`);
-            }
+            for (const p of prs) lines.push(`- #${p.number} ${p.state} merged=${p.merged_at || "no"} ${p.html_url}`);
+            const { data: prs2 } = await github.rest.pulls.list({
+              owner: "elizaOS", repo: "eliza", state: "all", per_page: 50,
+              head: "airdropia:fix/elizacloud-image-description-title",
+            });
+            for (const p of prs2) lines.push(`- #${p.number} ${p.state} merged=${p.merged_at || "no"} ${p.html_url}`);
+
             const body = `Automated digest ${new Date().toISOString()}\n\n${lines.join("\n")}\n`;
             const title = `bounty digest ${new Date().toISOString().slice(0, 10)}`;
             const { data: existing } = await github.rest.issues.listForRepo({
@@ -48,12 +72,8 @@ jobs:
             });
             const same = existing.find((i) => i.title === title);
             if (same) {
-              await github.rest.issues.update({
-                owner: "airdropia", repo: "earn-ops", issue_number: same.number, body,
-              });
+              await github.rest.issues.update({ owner: "airdropia", repo: "earn-ops", issue_number: same.number, body });
             } else {
-              await github.rest.issues.create({
-                owner: "airdropia", repo: "earn-ops", title, body,
-              });
+              await github.rest.issues.create({ owner: "airdropia", repo: "earn-ops", title, body });
             }
             console.log(body);
