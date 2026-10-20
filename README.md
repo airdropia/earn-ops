@@ -49,3 +49,14 @@ From the target repositories' own contribution guides:
    proof is a green run, not a claim.
 4. When the maintainer merges, the work is an accepted outcome and it
    shares the monthly pool.
+
+## Shipped so far
+
+| Pull request | Issue | Proof |
+|---|---|---|
+| [elizaOS/eliza#37158](https://github.com/elizaOS/eliza/pull/37158) | #37039 - a rate-limited stream attempt recorded as a successful empty call | [run](https://github.com/airdropia/eliza/actions/runs/39440621851) - 13 tests passed |
+| [elizaOS/eliza#37161](https://github.com/elizaOS/eliza/pull/37161) | #37035 - the image description title is lost when the model writes a bold label | [run](https://github.com/airdropia/eliza/actions/runs/39445841085) - 2 tests passed |
+
+Both pull requests target develop, follow the repository pull request template with all seven evidence rows, and carry a green regression run instead of a claim.
+
+The payout rail of the pool is USDC on Solana, so a Solana address is needed to receive it.
