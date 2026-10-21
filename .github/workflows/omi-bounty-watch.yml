@@ -1,0 +1,83 @@
+name: omi bounty watch
+
+# The omi repository publishes paid bounty proposals as issues and pays in
+# USDC on Base. A proposal is only worth taking while nobody else has, so
+# this workflow lists the open proposals and reports the unclaimed ones with
+# their amount, the files involved and the payout rail.
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Scan the omi bounty proposals
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/omi-bounties.mjs --json > bounty-scan.json
+      - name: Publish the digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const scan = JSON.parse(fs.readFileSync("bounty-scan.json", "utf8"));
+          const lines = [
+            "The omi bounty proposals that nobody has taken yet.",
+            "",
+            "Scanned " + scan.scanned + " open proposals, " + scan.unclaimed.length + " unclaimed.",
+            "",
+          ];
+          for (const b of scan.unclaimed) {
+            lines.push("### #" + b.number + " " + b.title);
+            lines.push("Amount: " + (b.amount || "see the issue") + (b.railAddress ? " - payout rail " + b.railAddress : ""));
+            if (b.files.length) lines.push("Files: " + b.files.join(", "));
+            lines.push(b.url);
+            lines.push("");
+          }
+          if (!scan.unclaimed.length) lines.push("Nothing is free right now. The next sweep runs tomorrow.");
+          const body = lines.join("\n");
+          const title = "omi bounty digest: " + scan.unclaimed.length + " unclaimed of " + scan.scanned;
+          const list = JSON.parse(
+            await (
+              await fetch("https://api.github.com/repos/airdropia/earn-ops/issues?state=open&labels=bounty-digest", {
+                headers: { Accept: "application/vnd.github+json", Authorization: "Bearer " + process.env.GH_TOKEN },
+              })
+            ).text(),
+          );
+          if (list.length) {
+            await fetch("https://api.github.com/repos/airdropia/earn-ops/issues/" + list[0].number, {
+              method: "PATCH",
+              headers: {
+                Accept: "application/vnd.github+json",
+                "Content-Type": "application/json",
+                Authorization: "Bearer " + process.env.GH_TOKEN,
+              },
+              body: JSON.stringify({ title, body }),
+            });
+            console.log("updated issue " + list[0].number);
+          } else {
+            await fetch("https://api.github.com/repos/airdropia/earn-ops/issues", {
+              method: "POST",
+              headers: {
+                Accept: "application/vnd.github+json",
+                "Content-Type": "application/json",
+                Authorization: "Bearer " + process.env.GH_TOKEN,
+              },
+              body: JSON.stringify({ title, body, labels: ["bounty-digest"] }),
+            });
+            console.log("created a digest issue");
+          }
+          NODE
