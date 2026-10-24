@@ -50,12 +50,12 @@ jobs:
       - name: Run the standalone example test
         # The example test needs no fixtures, and the package conftest imports
         # the CLI's HTTP stack, so conftest loading is skipped on purpose.
-        working-directory: omi/${{ inputs.working_dir }}
+        working-directory: omi
         run: python -m pytest "${{ inputs.test_file }}" -q --noconftest -p no:cacheprovider
 
       - name: Re-run the same test with unittest, to prove it is runner independent
-        working-directory: omi/${{ inputs.working_dir }}
-        run: python -m unittest discover -s tests -p "$(basename ${{ inputs.test_file }})" -v
+        working-directory: omi
+        run: python -m unittest discover -s "${{ inputs.working_dir }}/tests" -p "$(basename ${{ inputs.test_file }})" -v
 
       - name: Prove the exporter still imports cleanly and the module helpers behave
         working-directory: omi/${{ inputs.working_dir }}
