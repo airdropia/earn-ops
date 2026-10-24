@@ -48,8 +48,10 @@ jobs:
         run: python -m pip install --quiet pytest
 
       - name: Run the standalone example test
+        # The example test needs no fixtures, and the package conftest imports
+        # the CLI's HTTP stack, so conftest loading is skipped on purpose.
         working-directory: omi/${{ inputs.working_dir }}
-        run: python -m pytest "${{ inputs.test_file }}" -q
+        run: python -m pytest "${{ inputs.test_file }}" -q --noconftest -p no:cacheprovider
 
       - name: Re-run the same test with unittest, to prove it is runner independent
         working-directory: omi/${{ inputs.working_dir }}
