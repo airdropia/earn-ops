@@ -50,9 +50,17 @@ const recent = await api(
   `/repos/${REPO}/issues?state=all&per_page=100&sort=created&direction=desc&since=${new Date(Date.now() - 1000 * 60 * 60 * 24 * 45).toISOString()}`,
 );
 const fixIssues = recent.filter((i) => /^fix: resolve issue #/i.test(i.title || ""));
+// A pull request is not a proposal, and a "fix: resolve issue #N" issue means
+// somebody already took #N, so neither belongs in the free list.
+const siblingClaims = new Set(
+  fixIssues.map((i) => (i.title.match(/^fix: resolve issue #(\d+)/i) || [])[1]).filter(Boolean),
+);
 
 const free = [];
 for (const issue of candidates.values()) {
+  if (issue.pull_request) continue;
+  if (/^fix: resolve issue #/i.test(issue.title || "")) continue;
+  if (siblingClaims.has(String(issue.number))) continue;
   const body = issue.body || "";
   const implPr =
     body.match(/Implementation PR[^#\n]*#(\d+)/i) ||
