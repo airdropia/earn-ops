@@ -1,0 +1,72 @@
+name: omi pr verify
+
+# Verify an omi pull request branch without the upstream maintainer approval
+# gate (fork pull requests sit in `action_required` until a maintainer approves
+# them) and without depending on the fork's own Actions quota.
+#
+# The python-cli example tests are standalone: the exporter imports only the
+# standard library, so the test file can run here with nothing but Python and
+# pytest.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or SHA in airdropia/omi to verify
+        required: true
+        default: fix/cli-batch-export-filename-collision
+      test_file:
+        description: Test file path inside the checkout
+        required: true
+        default: sdks/python-cli/tests/test_conversations_to_markdown_filename_collisions.py
+      working_dir:
+        description: Directory to run pytest from
+        required: true
+        default: sdks/python-cli
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the omi fork at the requested ref
+        uses: actions/checkout@v4
+        with:
+          repository: airdropia/omi
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+          path: omi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python -m pip install --quiet pytest
+
+      - name: Run the standalone example test
+        working-directory: omi/${{ inputs.working_dir }}
+        run: python -m pytest "${{ inputs.test_file }}" -q
+
+      - name: Re-run the same test with unittest, to prove it is runner independent
+        working-directory: omi/${{ inputs.working_dir }}
+        run: python -m unittest discover -s tests -p "$(basename ${{ inputs.test_file }})" -v
+
+      - name: Prove the exporter still imports cleanly and the module helpers behave
+        working-directory: omi/${{ inputs.working_dir }}
+        run: |
+          python - <<'PY'
+          import importlib.util, pathlib
+          p = pathlib.Path("examples/conversations_to_markdown.py")
+          spec = importlib.util.spec_from_file_location("c2m", p)
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          assert m.speaker_label({"speaker_id": 0}) == "Speaker 0"
+          assert m.speaker_label({"speaker": False}) == "Speaker"
+          assert m.speaker_label({"speaker_name": "Bob"}) == "Bob"
+          assert m.flatten_line("a\nb") == "a b"
+          print("exporter helpers OK")
+          PY
